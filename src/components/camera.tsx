@@ -1,40 +1,64 @@
+import { BrowserMultiFormatReader, NotFoundException } from '@zxing/library';
 import React, { useRef, useEffect, useState } from 'react';
 
-const Camera: React.FC = () => {
+const CameraWithQRCode: React.FC = () => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const [stream, setStream] = useState<MediaStream | null>(null);
+  const [result, setResult] = useState<string[]>([]); //QRコード読み取り結果（配列）
+  const [codeReader, setCodeReader] = useState<BrowserMultiFormatReader | null>(null); //QRコードのデコーダーの状態（BrowserMultiFormatReaderのインスタンス）
+  const [isScanning, setIsScanning] = useState<boolean>(false); //QRコード読み取り可否の状態管理
 
   const startCamera = async () => {
     if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-        try {
-            const mediaStream = await navigator.mediaDevices.getUserMedia({ video: true });
-            setStream(mediaStream);
-            if (videoRef.current) {
-                videoRef.current.srcObject = mediaStream;
+      try {
+        const mediaStream = await navigator.mediaDevices.getUserMedia({ video: true });
+        if (videoRef.current) {
+          videoRef.current.srcObject = mediaStream;
+          const reader = new BrowserMultiFormatReader();
+          setCodeReader(reader);
+          reader.decodeFromVideoDevice(null, videoRef.current, async (result, error) => {
+            if (result) {
+              if (!isScanning) {
+                setIsScanning(true);
+                const decodeText = result.getText();
+                setResult(prevResult => [...prevResult, decodeText]);
+                await new Promise(resolve => setTimeout(resolve, 5000)); //次の読み込みまでの待機時間
+                setIsScanning(false);
+              }
             }
-        } catch (error) {
-            console.error('Error accessing the camera', error);
+            if (error && !(error instanceof NotFoundException)) {
+              console.error("QR code scan error", error);
+            }
+          });
         }
+      } catch (error) {
+          console.error('Error accessing the camera', error);
+      }
     } 
   };
-  
+
   const stopCamera = () => {
-    if (stream) {
-        stream.getTracks().forEach(track => track.stop()); //カメラストリームの停止
-        setStream(null);
-        if (videoRef.current) {
-            videoRef.current.srcObject = null;
-        }
+    if (codeReader) {
+      codeReader.reset(); //QRコードのデコーダーをリセットして停止
+    }
+    if (videoRef.current && videoRef.current.srcObject) {
+        const stream = videoRef.current.srcObject as MediaStream;
+        stream.getTracks().forEach(track => track.stop());
+        videoRef.current.srcObject = null;
     }
   };
 
+  //コンポーネントがアンマウントされる時にカメラとQRコードのデコーダーを停止
   useEffect(() => {
-    return () => { //クリーンアップ関数
-        if (stream) {
-            stream.getTracks().forEach(track => track.stop());
-        }
+    return () => {
+      if (codeReader) {
+        codeReader.reset();
+      }
+      if (videoRef.current && videoRef.current.srcObject) {
+        const stream = videoRef.current.srcObject as MediaStream;
+        stream.getTracks().forEach(track => track.stop());
+      }
     }
-  }, [stream]);
+  }, [codeReader]);
 
   return (
     <div className="flex flex-col items-center justify-center h-screen bg-gray-100">
@@ -53,8 +77,15 @@ const Camera: React.FC = () => {
           撮影停止
         </button>
       </div>
+      {result.length > 0 && (
+        <div className="mt-4 p-4 bg-white rounded-lg shadow-md">
+            {result.map((value, key) => (
+              <p key={key}>QRコードの結果:{value}</p>
+            ))}
+        </div>
+      )}
     </div>
   );
 };
 
-export default Camera;
+export default CameraWithQRCode;
